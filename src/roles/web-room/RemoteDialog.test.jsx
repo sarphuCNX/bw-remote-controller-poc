@@ -66,6 +66,27 @@ describe('RemoteDialog mouse handling', () => {
     expect(pipeline.button).not.toHaveBeenCalledWith(-1, false);
   });
 
+  test('mouseLeave_whileOnlyHovering_doesNotReleaseButtons', () => {
+    const { pipeline, pad } = renderDialog();
+    fireEvent.pointerMove(pad, mouse({ clientX: 10, clientY: 10 }));
+
+    fireEvent.pointerLeave(pad, mouse({ clientX: -1, clientY: 10, button: -1 }));
+
+    expect(pipeline.releaseAll).not.toHaveBeenCalled();
+  });
+
+  test('touchLift_doesNotReleaseAButtonHeldOnScreen', () => {
+    const { pipeline, pad } = renderDialog();
+    const touch = (overrides) => ({ pointerId: 7, pointerType: 'touch', ...overrides });
+    fireEvent.pointerDown(pad, touch({ clientX: 10, clientY: 10 }));
+    fireEvent.pointerUp(pad, touch({ clientX: 20, clientY: 10 }));
+
+    fireEvent.pointerLeave(pad, touch({ clientX: 20, clientY: 10 }));
+
+    expect(pipeline.releaseAll).not.toHaveBeenCalled();
+    expect(pipeline.button).not.toHaveBeenCalled();
+  });
+
   test('wheel_sendsScrollDeltas', () => {
     const { pipeline, pad } = renderDialog();
 

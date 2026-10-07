@@ -100,6 +100,40 @@ describe('usePairing status check on connect', () => {
     expect(hook.result.current.message).toBe('pairing ended while offline');
   });
 
+  test('staleDisconnectedStatus_afterPairSuccessful_isIgnored', async () => {
+    let resolveStatus;
+    const { hook, emit, api } = createHarness({
+      pairStatus: vi.fn(() => new Promise((resolve) => (resolveStatus = resolve))),
+    });
+    hook.rerender({ socketStatus: 'connected' });
+    await waitFor(() => expect(api.pairStatus).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    act(() => emit({ type: 'PAIR_SUCCESSFUL', deviceName: 'Room A' }));
+
+    await act(async () => {
+      resolveStatus({ message: 'DISCONNECTED' });
+    });
+
+    expect(hook.result.current.isPaired).toBe(true);
+  });
+
+  test('statusResponse_afterUnmount_doesNotThrow', async () => {
+    let resolveStatus;
+    const { hook, api } = createHarness({
+      pairStatus: vi.fn(() => new Promise((resolve) => (resolveStatus = resolve))),
+    });
+    hook.rerender({ socketStatus: 'connected' });
+    await waitFor(() => expect(api.pairStatus).toHaveBeenCalled());
+    hook.unmount();
+
+    await expect(
+      (async () => {
+        resolveStatus({ message: 'CONNECTED', data: {} });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      })(),
+    ).resolves.toBeUndefined();
+  });
+
   test('statusDisconnected_duringPinEntry_doesNotDisturbTheStep', async () => {
     const { api, hook } = createHarness();
     act(() => hook.result.current.setRoomId('ABCDE'));

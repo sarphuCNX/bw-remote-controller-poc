@@ -48,17 +48,11 @@ const PanelRole = () => {
 
   useEffect(() => receiver.setApplyDelay(applyDelay), [receiver, applyDelay]);
 
-  const sessionIdRef = useRef('');
   const onDataChannel = useCallback(
     (channel, pc, sessionId) => {
-      // A new cymcast session means a new controller run: start counters fresh.
-      if (sessionId !== sessionIdRef.current) {
-        sessionIdRef.current = sessionId;
-        receiver.reset();
-        setStats(null);
-      }
       pcRef.current = pc;
-      receiver.attachChannel(channel);
+      // The receiver owns per-session state: a new session id resets it.
+      receiver.attachChannel(channel, sessionId);
       appendEvent(`datachannel ${channel.label} attached`);
     },
     [appendEvent, receiver],

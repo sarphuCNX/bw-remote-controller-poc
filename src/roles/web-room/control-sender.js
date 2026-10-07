@@ -15,6 +15,14 @@ export const OPEN_TIMEOUT_MS = 5000;
 export const RECONNECT_INITIAL_MS = 1000;
 export const RECONNECT_MAX_MS = 15000;
 export const STATS_INTERVAL_MS = 1000;
+/** The one close reason the user asked for. */
+export const USER_STOP_REASON = 'stopped';
+/**
+ * Close reasons that end the session for good: the user stopped, the panel or
+ * another controller ended it, or the session no longer exists. These must
+ * never trigger a fallback to another input path.
+ */
+export const TERMINAL_REASONS = Object.freeze(new Set([USER_STOP_REASON, 'bye', 'preempted', 'resume-rejected']));
 const MAX_RUNG = 2; // 1: ICE restart, 2: relay-only rebuild
 
 /**
@@ -205,7 +213,8 @@ export function createControlSender({
       close('grant-failed');
       return;
     }
-    if (stopped) return;
+    // The deadline may have closed the sender while the grant was in flight.
+    if (stopped || phase === 'closed') return;
     send({ type: 'connect', token: grant });
     setPhase('signaling', 'joining panel');
   }
@@ -292,6 +301,9 @@ export function createControlSender({
       if (state === 'connected') {
         rung = 0;
         startStats();
+        // A successful in-place recovery keeps the existing channels, so no
+        // onopen will fire: settle the phase and the deadline here.
+        if (channelsOpen()) markReady();
       } else if (state === 'failed') {
         recover();
       }
@@ -309,12 +321,19 @@ export function createControlSender({
     void reoffer({ iceRestart: false });
   }
 
-  function onChannelOpen() {
-    if (!pointerChannel || !controlChannel) return;
-    if (pointerChannel.readyState !== 'open' || controlChannel.readyState !== 'open') return;
+  function channelsOpen() {
+    return !!pointerChannel && !!controlChannel && pointerChannel.readyState === 'open' && controlChannel.readyState === 'open';
+  }
+
+  function markReady() {
     cancel(openTimer);
     openTimer = null;
-    setPhase('ready', 'ready');
+    if (phase !== 'ready') setPhase('ready', 'ready');
+  }
+
+  function onChannelOpen() {
+    if (!channelsOpen()) return;
+    markReady();
     sendControl({ t: CONTROL_MESSAGE.HELLO, role: 'controller' });
     cb.onChannels({ pointerChannel, controlChannel });
   }
@@ -428,7 +447,7 @@ export function createControlSender({
     stop() {
       stopped = true;
       sendSession({ type: 'bye' });
-      close('stopped');
+      close(USER_STOP_REASON);
     },
     sendControl,
     getState: () => ({ phase, rung, sessionId: sessionId ? 'set' : '', hasPc: !!pc }),

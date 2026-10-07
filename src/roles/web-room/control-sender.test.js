@@ -263,11 +263,48 @@ describe('createControlSender failure and recovery', () => {
     const h = createHarness();
     await connectToPeer(h);
 
-    const openTimer = h.timers.find((t) => t.ms === 5000);
-    openTimer.fn();
+    const liveDeadline = h.timers.filter((t) => t.ms === 5000 && !t.cancelled).pop();
+    liveDeadline.fn();
 
     expect(h.events.closed).toEqual(['open-timeout']);
     expect(h.sender.getState().phase).toBe('closed');
+  });
+
+  test('rungOneRestartSucceeds_returnsToReadyAndCancelsDeadline', async () => {
+    const h = createHarness();
+    const { pc } = await connectToPeer(h);
+    pc.channels.pointer.readyState = 'open';
+    pc.channels.pointer.onopen();
+    pc.channels.control.readyState = 'open';
+    pc.channels.control.onopen();
+    pc.connectionState = 'failed';
+    pc.onconnectionstatechange();
+    await h.flush();
+    expect(h.sender.getState().phase).toBe('recovering');
+
+    pc.connectionState = 'connected';
+    pc.onconnectionstatechange();
+
+    expect(h.sender.getState()).toMatchObject({ phase: 'ready', rung: 0 });
+    expect(h.timers.filter((t) => t.ms === 5000).every((t) => t.cancelled)).toBe(true);
+  });
+
+  test('grantResolvesAfterDeadlineClosed_doesNotReopenTheSender', async () => {
+    let resolveGrant;
+    const h = createHarness({ getGrant: () => new Promise((resolve) => (resolveGrant = resolve)) });
+    h.sender.start();
+    await h.flush();
+    h.FakeWebSocket.sockets[0].onopen();
+    await h.flush();
+    h.timers.filter((t) => t.ms === 5000 && !t.cancelled).pop().fn();
+    expect(h.events.closed).toEqual(['open-timeout']);
+    const phasesAfterClose = h.events.phases.length;
+
+    resolveGrant('late-grant');
+    await h.flush();
+
+    expect(h.sender.getState().phase).toBe('closed');
+    expect(h.events.phases.length).toBe(phasesAfterClose);
   });
 
   test('connectionFailed_firstTime_reoffersWithIceRestart', async () => {

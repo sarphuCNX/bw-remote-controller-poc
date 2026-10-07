@@ -4,7 +4,7 @@
 // opens, or the socket path (comparison mode, or fallback after a timeout).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createControlSender } from './control-sender';
+import { createControlSender, TERMINAL_REASONS, USER_STOP_REASON } from './control-sender';
 import { createDataChannelSink, createSocketSink, SOCKET_CHANNEL, V1_TYPES } from './sinks';
 import { createInputPipeline } from './input-pipeline';
 import { createLatencyProbe } from '../../shared/metrics/latency-probe';
@@ -12,8 +12,6 @@ import { createSampleRing, summarize } from '../../shared/metrics/stats';
 import { CONTROL_MESSAGE, decodeControlMessage } from '../../shared/protocol/control-messages';
 
 export const PATH = Object.freeze({ DATACHANNEL: 'datachannel', SOCKET: 'socket' });
-// Every close the user did not ask for falls back to the socket path.
-const USER_STOP_REASON = 'stopped';
 
 /**
  * Manages a remote-control session.
@@ -35,7 +33,9 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
   const [pair, setPairState] = useState({ pairType: '', rttMs: null });
   const [metrics, setMetrics] = useState(null);
   const [log, setLog] = useState([]);
+  const [endedReason, setEndedReason] = useState('');
 
+  const stopRef = useRef(null);
   const pairRef = useRef({ pairType: '', rttMs: null });
   const setPair = useCallback((next) => {
     pairRef.current = next;
@@ -146,7 +146,15 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
           appendLog(`datachannel closed: ${reason}`);
           channelsRef.current = null;
           if (senderRef.current === sender) senderRef.current = null;
-          if (reason !== USER_STOP_REASON) activateSocketPath(`fallback after ${reason}`);
+          if (reason === USER_STOP_REASON) return;
+          if (TERMINAL_REASONS.has(reason)) {
+            // The panel or another controller ended the session: never keep
+            // driving the panel over another path.
+            setEndedReason(reason);
+            if (stopRef.current) stopRef.current();
+            return;
+          }
+          activateSocketPath(`fallback after ${reason}`);
         },
       },
     });
@@ -162,6 +170,7 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
     setStatus('');
     setPair({ pairType: '', rttMs: null });
     setMetrics(null);
+    setEndedReason('');
     socket.emit(SOCKET_CHANNEL, { type: V1_TYPES.REMOTE_START });
     setOpen(true);
     if (preferredPath === PATH.DATACHANNEL) startDataChannel();
@@ -184,6 +193,7 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
     setActivePath('');
     setPhase('idle');
   }, [socket]);
+  stopRef.current = stop;
 
   // Switch path while open (comparison mode).
   const switchPath = useCallback(
@@ -240,6 +250,7 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
     pair,
     metrics,
     log,
+    endedReason,
     start,
     stop,
     pipeline: () => pipelineRef.current,

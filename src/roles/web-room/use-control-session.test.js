@@ -3,20 +3,23 @@ import { PATH, useControlSession } from './use-control-session';
 
 const { senders } = vi.hoisted(() => ({ senders: [] }));
 
-vi.mock('./control-sender', () => ({
-  createControlSender: vi.fn((options) => {
-    const sender = {
-      options,
-      start: vi.fn(),
-      stop: vi.fn(),
-      sendControl: vi.fn(() => true),
-      getState: () => ({ phase: 'idle' }),
-    };
-    senders.push(sender);
-    return sender;
-  }),
-  readSelectedPair: () => ({ pairType: '', rttMs: null }),
-}));
+vi.mock('./control-sender', async () => {
+  const actual = await vi.importActual('./control-sender');
+  return {
+    ...actual,
+    createControlSender: vi.fn((options) => {
+      const sender = {
+        options,
+        start: vi.fn(),
+        stop: vi.fn(),
+        sendControl: vi.fn(() => true),
+        getState: () => ({ phase: 'idle' }),
+      };
+      senders.push(sender);
+      return sender;
+    }),
+  };
+});
 
 /**
  * Renders the hook over a fake socket, api and subscription.
@@ -104,6 +107,39 @@ describe('useControlSession fallback and path switching', () => {
 
     expect(hook.result.current.activePath).toBe(PATH.SOCKET);
     expect(hook.result.current.log.some((l) => l.includes('fallback after signaling-lost'))).toBe(true);
+  });
+
+  test('senderClosed_withPreempted_endsSessionInsteadOfFallingBack', () => {
+    const { hook, socket } = createHarness();
+    act(() => hook.result.current.start());
+
+    act(() => senders[0].options.callbacks.onClosed('preempted'));
+
+    expect(hook.result.current.open).toBe(false);
+    expect(hook.result.current.activePath).toBe('');
+    expect(hook.result.current.endedReason).toBe('preempted');
+    expect(socket.emit).toHaveBeenLastCalledWith('REMOTE_CONTROL', { type: 'REMOTE_STOP' });
+  });
+
+  test('senderClosed_withBye_endsSessionInsteadOfFallingBack', () => {
+    const { hook } = createHarness();
+    act(() => hook.result.current.start());
+
+    act(() => senders[0].options.callbacks.onClosed('bye'));
+
+    expect(hook.result.current.open).toBe(false);
+    expect(hook.result.current.endedReason).toBe('bye');
+  });
+
+  test('start_afterEndedSession_clearsEndedReason', () => {
+    const { hook } = createHarness();
+    act(() => hook.result.current.start());
+    act(() => senders[0].options.callbacks.onClosed('preempted'));
+
+    act(() => hook.result.current.start());
+
+    expect(hook.result.current.endedReason).toBe('');
+    expect(hook.result.current.open).toBe(true);
   });
 
   test('senderClosed_withUserStop_doesNotFallBack', () => {

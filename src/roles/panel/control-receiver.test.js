@@ -71,6 +71,50 @@ describe('createControlReceiver pointer', () => {
     expect(receiver.getCursor().buttons).toBe(0);
   });
 
+  test('reset_releasesHeldButtonsAndEmitsCursor', () => {
+    const { receiver, controlChannel, cursors } = createHarness();
+    controlChannel.onmessage({ data: JSON.stringify({ t: 'button', button: 0, down: true, seq: 1 }) });
+    const before = cursors.length;
+
+    receiver.reset();
+
+    expect(receiver.getCursor().buttons).toBe(0);
+    expect(cursors.length).toBe(before + 1);
+  });
+
+  test('beginSession_withNewId_resetsState_andSameIdDoesNot', () => {
+    const { receiver, pointerChannel } = createHarness();
+    pointerChannel.onmessage({ data: encodePointerFrame({ seq: 5, tsMs: 0 }) });
+
+    const firstStarted = receiver.beginSession('s1');
+    expect(firstStarted).toBe(true);
+    expect(receiver.getStats().pointerFrames).toBe(0);
+    pointerChannel.onmessage({ data: encodePointerFrame({ seq: 6, tsMs: 0 }) });
+    const secondChannelOfSameSession = receiver.beginSession('s1');
+
+    expect(secondChannelOfSameSession).toBe(false);
+    expect(receiver.getStats().pointerFrames).toBe(1);
+  });
+
+  test('attachChannel_withSessionId_beginsThatSession', () => {
+    const receiver = createControlReceiver();
+    receiver.attachChannel({ label: 'pointer' }, 'a');
+
+    const started = receiver.beginSession('a');
+
+    expect(started).toBe(false);
+  });
+
+  test('controlChannelClose_releasesHeldButtons', () => {
+    const { receiver, controlChannel } = createHarness();
+    controlChannel.onmessage({ data: JSON.stringify({ t: 'button', button: 0, down: true, seq: 1 }) });
+    expect(receiver.getCursor().buttons).toBe(1);
+
+    controlChannel.onclose();
+
+    expect(receiver.getCursor().buttons).toBe(0);
+  });
+
   test('reset_clearsCountersAndLastSeq', () => {
     const { receiver, pointerChannel } = createHarness();
     pointerChannel.onmessage({ data: encodePointerFrame({ seq: 40000, tsMs: 0 }) });

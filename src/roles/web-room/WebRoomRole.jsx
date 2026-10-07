@@ -150,7 +150,11 @@ const WebRoomRole = () => {
               {scriptRunning ? 'Stop gesture script' : 'Run 60 s gesture script'}
             </button>
             <span className="muted" data-testid="control-status">
-              {control.open ? `${control.activePath || 'starting'} · ${control.phase} · ${control.status}` : 'idle'}
+              {control.open
+                ? `${control.activePath || 'starting'} · ${control.phase} · ${control.status}`
+                : control.endedReason
+                  ? `session ended: ${control.endedReason}`
+                  : 'idle'}
             </span>
           </div>
           <MetricsPanel metrics={control.metrics} log={control.log} />

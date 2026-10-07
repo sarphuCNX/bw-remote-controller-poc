@@ -34,6 +34,18 @@ export function createControlReceiver({ surface = DEFAULT_SURFACE, now, applyDel
   const stats = { pointerFrames: 0, pointerLost: 0, discreteEvents: 0, lastSeq: -1 };
   let controlChannel = null;
   let delay = applyDelayMs;
+  let currentSessionId = '';
+
+  /**
+   * Releases every held button, as a real injector must when its controller
+   * goes away: a drag must never outlive the channel that started it.
+   * @returns {void}
+   */
+  function releaseHeldButtons() {
+    if (!cursor.buttons) return;
+    cursor.buttons = 0;
+    cb.onCursor({ ...cursor });
+  }
 
   const clamp = (v, max) => Math.max(0, Math.min(max, v));
 
@@ -121,11 +133,41 @@ export function createControlReceiver({ surface = DEFAULT_SURFACE, now, applyDel
   }
 
   /**
+   * Clears per-session state: counters, the control channel and any held button.
+   * @returns {void}
+   */
+  function reset() {
+    controlChannel = null;
+    stats.pointerFrames = 0;
+    stats.pointerLost = 0;
+    stats.discreteEvents = 0;
+    stats.lastSeq = -1;
+    releaseHeldButtons();
+    cb.onStats({ ...stats });
+  }
+
+  /**
+   * Marks the start of a controller session. The first channel of a new
+   * session resets the receiver; the second channel of the same session does not.
+   * @param {string} sessionId - the cymcast session id
+   * @returns {boolean} true when a new session started (state was reset)
+   */
+  function beginSession(sessionId) {
+    const id = String(sessionId || '');
+    if (id && id === currentSessionId) return false;
+    currentSessionId = id;
+    reset();
+    return true;
+  }
+
+  /**
    * Binds a DataChannel by label.
    * @param {RTCDataChannel} channel - an incoming channel
+   * @param {string} [sessionId] - when given, begins that session first
    * @returns {boolean} true when the label was recognised
    */
-  function attachChannel(channel) {
+  function attachChannel(channel, sessionId) {
+    if (sessionId !== undefined) beginSession(sessionId);
     if (channel.label === 'pointer') {
       channel.binaryType = 'arraybuffer';
       channel.onmessage = (event) => onPointerData(event.data);
@@ -134,6 +176,10 @@ export function createControlReceiver({ surface = DEFAULT_SURFACE, now, applyDel
     if (channel.label === 'control') {
       controlChannel = channel;
       channel.onmessage = (event) => onControlData(event.data);
+      channel.onclose = () => {
+        if (controlChannel === channel) controlChannel = null;
+        releaseHeldButtons();
+      };
       return true;
     }
     return false;
@@ -141,6 +187,7 @@ export function createControlReceiver({ surface = DEFAULT_SURFACE, now, applyDel
 
   return {
     attachChannel,
+    beginSession,
     onPointerData,
     onControlData,
     setApplyDelay(ms) {
@@ -148,12 +195,6 @@ export function createControlReceiver({ surface = DEFAULT_SURFACE, now, applyDel
     },
     getCursor: () => ({ ...cursor }),
     getStats: () => ({ ...stats }),
-    reset() {
-      controlChannel = null;
-      stats.pointerFrames = 0;
-      stats.pointerLost = 0;
-      stats.discreteEvents = 0;
-      stats.lastSeq = -1;
-    },
+    reset,
   };
 }

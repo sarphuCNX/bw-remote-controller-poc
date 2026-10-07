@@ -4,7 +4,7 @@
 // PAIR_SUCCESSFUL and cleared by UNPAIR_DEVICE; REST status is checked on
 // (re)connect so the UI never shows a stale state.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export const PAIRING_STEP = Object.freeze({
   ROOM_ID: 'room-id',
@@ -30,11 +30,13 @@ export function usePairing({ api, token, subscribe, socketStatus }) {
   const [deviceName, setDeviceName] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
+  const lastSocketEventAtRef = useRef(0);
 
   // Socket-driven confirmation and teardown.
   useEffect(() => {
     return subscribe(({ event, payload }) => {
       if (event !== 'message' || !payload) return;
+      lastSocketEventAtRef.current = Date.now();
       if (payload.type === 'PAIR_SUCCESSFUL') {
         setStep(PAIRING_STEP.PAIRED);
         setDeviceName(payload.deviceName || '');
@@ -47,12 +49,17 @@ export function usePairing({ api, token, subscribe, socketStatus }) {
     });
   }, [subscribe]);
 
-  // REST status on every (re)connect, so a stale UI state cannot survive.
+  // REST status on every (re)connect, so a stale UI state cannot survive. The
+  // answer is ignored if the effect was torn down meanwhile, or if a socket
+  // message (the fresher source) arrived after the request was made.
   useEffect(() => {
-    if (!token || socketStatus !== 'connected') return;
+    if (!token || socketStatus !== 'connected') return undefined;
+    let cancelled = false;
+    const requestedAt = Date.now();
     api
       .pairStatus(token)
       .then((status) => {
+        if (cancelled || lastSocketEventAtRef.current > requestedAt) return;
         if (status.message === 'CONNECTED') {
           setStep(PAIRING_STEP.PAIRED);
           setHardwareId((status.data && status.data.hardwareId) || '');
@@ -66,6 +73,9 @@ export function usePairing({ api, token, subscribe, socketStatus }) {
         setMessage((current) => (current === 'paired' ? 'pairing ended while offline' : current));
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [api, token, socketStatus]);
 
   const requestPin = useCallback(async () => {
