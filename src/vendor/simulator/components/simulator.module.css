@@ -1,0 +1,286 @@
+.page {
+  min-height: 100vh;
+  background: radial-gradient(circle at 30% 20%, #1a1442 0%, #05030f 70%);
+  color: #f4f4f8;
+  font-family: 'Roboto', sans-serif;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 16px;
+  box-sizing: border-box;
+}
+
+.header {
+  width: 100%;
+  max-width: 960px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-top: 4px;
+}
+
+.panel {
+  width: 100%;
+  max-width: 960px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 24px;
+  box-sizing: border-box;
+}
+
+.configRow {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 16px;
+}
+
+.configLabel {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  margin-bottom: 6px;
+}
+
+.configInput {
+  font-size: 14px;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  padding: 10px 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.configHint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.45);
+  margin-top: 8px;
+}
+
+.versionBanner {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.55);
+  background: rgba(51, 85, 251, 0.12);
+  border: 1px solid rgba(51, 85, 251, 0.35);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+}
+
+.versionBanner strong {
+  color: #ffffff;
+}
+
+.primaryButton {
+  font-size: 15px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #3355fb;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 20px;
+  cursor: pointer;
+}
+
+.primaryButton:disabled {
+  background: rgba(255, 255, 255, 0.15);
+  cursor: not-allowed;
+}
+
+.secondaryButton {
+  font-size: 14px;
+  color: #ffffff;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+}
+
+.codeBlock {
+  text-align: center;
+  margin: 8px 0 24px;
+}
+
+.codeLabel {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.codeValue {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  margin-top: 6px;
+}
+
+.codeCaption {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  margin-top: 8px;
+}
+
+.pinRow {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.pinCard {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  padding: 14px 18px;
+  min-width: 200px;
+  text-align: center;
+}
+
+.pinCardCast {
+  border-color: #ffc773;
+}
+
+.pinLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.pinValue {
+  font-family: 'Roboto Mono', monospace;
+  font-size: 30px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  margin: 6px 0;
+}
+
+.pinTtl {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.copyButton {
+  font-size: 12px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+  border: none;
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  margin-top: 4px;
+}
+
+.screen {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000000;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-top: 8px;
+}
+
+.video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000000;
+}
+
+/* Fill the whole display when fullscreen; drop the 16/9 letterbox framing. */
+.screen:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  aspect-ratio: auto;
+  border-radius: 0;
+  margin-top: 0;
+}
+
+.fullscreenButton {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 2;
+  font-size: 13px;
+  color: #ffffff;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+.fullscreenButton:hover {
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.screenIdle {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 14px;
+  gap: 8px;
+}
+
+.statusRow {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.statsOverlay {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 11px;
+  color: #b7ffcf;
+}
+
+.pairedPill {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #1f9d55;
+  border-radius: 9999px;
+  padding: 4px 12px;
+}
+
+.errorText {
+  color: #ff8a8a;
+  font-size: 13px;
+  margin-top: 12px;
+}
