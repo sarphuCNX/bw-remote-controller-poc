@@ -116,8 +116,11 @@ export function createInputPipeline({ sink, requestFrame, cancelFrame, now, onSe
      */
     button(button, down) {
       const mask = BUTTON_MASKS[button] || 0;
-      buttons = down ? buttons | mask : buttons & ~mask;
-      return sendDiscrete({ t: CONTROL_MESSAGE.BUTTON, button, down });
+      if (!mask) return null;
+      const sent = sendDiscrete({ t: CONTROL_MESSAGE.BUTTON, button, down });
+      // The local mask only follows what the panel was actually told.
+      if (sent) buttons = down ? buttons | mask : buttons & ~mask;
+      return sent;
     },
     /**
      * A full click (down and up) as one event, for on-screen buttons.

@@ -16,7 +16,7 @@ Analysis, Cloudflare Options and Best Practices* (section 4.5, HZ-P2P).
 | 2 | A control session opens through **production cymcast** with the **existing cast grant** and **no server change** | done |
 | 3 | Pointer and keys over the DataChannel are smoother than today's socket path | done, see `docs/results.md` |
 | 4 | Forced Cloudflare TURN relay works and is measured | done |
-| 5 | Fallback to the socket path when the channel does not open | unit-tested (`control-sender.test.js`); live run pending |
+| 5 | Fallback to the socket path when the channel does not open, or closes for any reason other than a user stop | unit-tested end to end (`control-sender.test.js` deadlines, `use-control-session.test.js` fallback wiring); live run pending |
 | 6 | Behaviour under impairment (latency + loss) | procedure in `docs/results.md`; run pending |
 
 ## Run
@@ -80,7 +80,7 @@ today's v1 `REMOTE_CONTROL` payloads; the panel acks and answers probes via `MEE
 ## Tests
 
 ```bash
-npm test          # vitest: 206 tests (pure modules + vendored characterization suites)
+npm test          # vitest: pure modules, hooks and components, vendored characterization suites
 npm run lint
 npm run build
 ```

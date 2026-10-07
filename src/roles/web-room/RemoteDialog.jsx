@@ -31,7 +31,8 @@ function keyPayload(event, down) {
  */
 export const RemoteDialog = ({ getPipeline, onClose, statusLine, onToggleScript, scriptRunning = false }) => {
   const padRef = useRef(null);
-  const pointers = useRef(new Map()); // pointerId -> {x, y}
+  const pointers = useRef(new Map()); // pressed pointers: pointerId -> {x, y}
+  const hover = useRef(null); // last mouse position while no button is held
 
   const withPipeline = useCallback(
     (fn) => {
@@ -43,25 +44,38 @@ export const RemoteDialog = ({ getPipeline, onClose, statusLine, onToggleScript,
 
   const onPointerDown = (event) => {
     event.preventDefault();
-    padRef.current.setPointerCapture(event.pointerId);
+    if (padRef.current && typeof padRef.current.setPointerCapture === 'function') {
+      padRef.current.setPointerCapture(event.pointerId);
+    }
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    hover.current = null;
     if (event.pointerType === 'mouse') withPipeline((p) => p.button(event.button, true));
   };
 
   const onPointerMove = (event) => {
-    const last = pointers.current.get(event.pointerId);
     const isTouch = event.pointerType === 'touch';
-    if (!last && isTouch) return;
+    const pressed = pointers.current.get(event.pointerId);
+    let last = pressed;
+    if (!last) {
+      if (isTouch) return; // a touch that did not start on the pad
+      // Plain mouse motion: the first sample only seeds the reference point.
+      if (!hover.current) {
+        hover.current = { x: event.clientX, y: event.clientY };
+        return;
+      }
+      last = hover.current;
+    }
     const samples = typeof event.getCoalescedEvents === 'function' ? event.getCoalescedEvents() : [event];
     let dx = 0;
     let dy = 0;
-    let prev = last || { x: event.clientX, y: event.clientY };
+    let prev = last;
     samples.forEach((sample) => {
       dx += sample.clientX - prev.x;
       dy += sample.clientY - prev.y;
       prev = { x: sample.clientX, y: sample.clientY };
     });
-    if (last) pointers.current.set(event.pointerId, prev);
+    if (pressed) pointers.current.set(event.pointerId, prev);
+    else hover.current = prev;
     if (isTouch && pointers.current.size >= 2) {
       withPipeline((p) => p.scroll(dx, dy));
       return;
@@ -70,8 +84,19 @@ export const RemoteDialog = ({ getPipeline, onClose, statusLine, onToggleScript,
   };
 
   const onPointerUp = (event) => {
+    const lastPressed = pointers.current.get(event.pointerId);
     pointers.current.delete(event.pointerId);
-    if (event.pointerType === 'mouse') withPipeline((p) => p.button(event.button, false));
+    if (event.pointerType === 'mouse') {
+      hover.current = lastPressed || { x: event.clientX, y: event.clientY };
+      if (event.button >= 0) withPipeline((p) => p.button(event.button, false));
+    }
+  };
+
+  // Leaving the pad or a cancelled pointer must never leave a button held.
+  const onPointerGone = (event) => {
+    pointers.current.delete(event.pointerId);
+    hover.current = null;
+    withPipeline((p) => p.releaseAll());
   };
 
   const onWheel = (event) => {
@@ -128,8 +153,8 @@ export const RemoteDialog = ({ getPipeline, onClose, statusLine, onToggleScript,
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={onPointerUp}
-        onPointerLeave={onPointerUp}
+        onPointerCancel={onPointerGone}
+        onPointerLeave={onPointerGone}
         onWheel={onWheel}
         onKeyDown={onKeyDown}
         onKeyUp={onKeyUp}

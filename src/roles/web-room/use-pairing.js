@@ -58,7 +58,12 @@ export function usePairing({ api, token, subscribe, socketStatus }) {
           setHardwareId((status.data && status.data.hardwareId) || '');
           setRoomId((status.data && status.data.deviceCode) || '');
           setDeviceName((status.data && status.data.deviceName) || '');
+          return;
         }
+        // The server says we are not paired (for example it unpaired us while
+        // the socket was down): never keep showing a paired UI.
+        setStep((current) => (current === PAIRING_STEP.PAIRED ? PAIRING_STEP.ROOM_ID : current));
+        setMessage((current) => (current === 'paired' ? 'pairing ended while offline' : current));
       })
       .catch(() => {});
   }, [api, token, socketStatus]);

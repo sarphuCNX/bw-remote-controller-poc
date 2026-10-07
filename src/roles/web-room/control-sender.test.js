@@ -232,6 +232,33 @@ describe('createControlSender happy path', () => {
 });
 
 describe('createControlSender failure and recovery', () => {
+  test('deadline_whenNoPeerArrivesAfterConnect_closesWithOpenTimeout', async () => {
+    const h = createHarness();
+    h.sender.start();
+    await h.flush();
+    h.FakeWebSocket.sockets[0].onopen();
+    await h.flush();
+
+    const deadline = h.timers.filter((t) => t.ms === 5000 && !t.cancelled).pop();
+    deadline.fn();
+
+    expect(h.events.closed).toEqual(['open-timeout']);
+  });
+
+  test('rungOneDeadline_withoutReconnect_escalatesToRelayRebuild', async () => {
+    const h = createHarness();
+    const { pc } = await connectToPeer(h);
+    pc.connectionState = 'failed';
+    pc.onconnectionstatechange();
+    await h.flush();
+
+    const rungDeadline = h.timers.filter((t) => t.ms === 5000 && !t.cancelled).pop();
+    rungDeadline.fn();
+
+    expect(h.sender.getState()).toMatchObject({ phase: 'recovering', rung: 2 });
+    expect(h.pcFactory.pcs[1].config.iceTransportPolicy).toBe('relay');
+  });
+
   test('openTimeout_whileConnecting_closesWithOpenTimeout', async () => {
     const h = createHarness();
     await connectToPeer(h);

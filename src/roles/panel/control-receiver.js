@@ -51,7 +51,8 @@ export function createControlReceiver({ surface = DEFAULT_SURFACE, now, applyDel
       cursor.x = clamp(cursor.x + frame.dx, surface.width);
       cursor.y = clamp(cursor.y + frame.dy, surface.height);
     }
-    cursor.buttons = frame.buttons;
+    // Button state comes only from the reliable control channel: a late or
+    // reordered pointer frame must never re-press a released button.
     cb.onCursor({ ...cursor, wheelX: frame.wheelX, wheelY: frame.wheelY, tsMs: frame.tsMs });
   }
 

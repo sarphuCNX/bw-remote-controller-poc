@@ -133,6 +133,19 @@ export function createControlSender({
     return send({ ...obj, sessionId, sessionToken });
   }
 
+  // ---- deadline: one bounded wait for "channels open", re-armed per attempt ----
+
+  function armOpenDeadline() {
+    cancel(openTimer);
+    openTimer = later(() => {
+      openTimer = null;
+      if (phase === 'ready' || phase === 'closed') return;
+      // A recovery rung that did not reconnect in time escalates to the next rung.
+      if (phase === 'recovering') recover();
+      else close('open-timeout');
+    }, OPEN_TIMEOUT_MS);
+  }
+
   // ---- signaling ----
 
   async function openSignaling({ resume = false } = {}) {
@@ -263,7 +276,6 @@ export function createControlSender({
 
   function startPeer({ policy }) {
     closePc();
-    cancel(openTimer);
     pc = createPc({ iceServers, iceTransportPolicy: policy });
     pendingRemoteCandidates = [];
 
@@ -292,11 +304,8 @@ export function createControlSender({
     pointerChannel.onopen = onChannelOpen;
     controlChannel.onopen = onChannelOpen;
 
-    setPhase('connecting', 'connecting');
-    openTimer = later(() => {
-      openTimer = null;
-      if (phase === 'connecting' || phase === 'recovering') close('open-timeout');
-    }, OPEN_TIMEOUT_MS);
+    if (phase !== 'recovering') setPhase('connecting', 'connecting');
+    armOpenDeadline();
     void reoffer({ iceRestart: false });
   }
 
@@ -358,6 +367,7 @@ export function createControlSender({
     }
     setPhase('recovering', `recovering connection (step ${rung}/${MAX_RUNG})`);
     if (rung === 1) {
+      armOpenDeadline();
       void reoffer({ iceRestart: true });
     } else {
       startPeer({ policy: 'relay' });
@@ -407,6 +417,8 @@ export function createControlSender({
   return {
     start() {
       stopped = false;
+      // The deadline covers signaling and the grant too, not only ICE.
+      armOpenDeadline();
       void openSignaling();
     },
     /**

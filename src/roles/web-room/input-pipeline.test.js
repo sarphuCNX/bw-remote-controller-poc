@@ -143,6 +143,23 @@ describe('createInputPipeline discrete events', () => {
     expect(pipeline.heldButtons()).toBe(0);
   });
 
+  test('button_whenSinkDisconnected_doesNotChangeHeldButtons', () => {
+    const { pipeline } = createHarness({ connected: false });
+
+    pipeline.button(0, true);
+
+    expect(pipeline.heldButtons()).toBe(0);
+  });
+
+  test('button_withUnknownButtonIndex_returnsNullAndSendsNothing', () => {
+    const { pipeline, discretes } = createHarness();
+
+    const sent = pipeline.button(-1, false);
+
+    expect(sent).toBeNull();
+    expect(discretes).toHaveLength(0);
+  });
+
   test('setSink_routesSubsequentEventsToNewSink', () => {
     const { pipeline, discretes } = createHarness();
     const other = [];

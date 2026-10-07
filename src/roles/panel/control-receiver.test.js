@@ -63,6 +63,24 @@ describe('createControlReceiver pointer', () => {
     expect(receiver.getStats()).toMatchObject({ pointerFrames: 2, pointerLost: 2, lastSeq: 4 });
   });
 
+  test('pointerFrame_withButtonsSet_doesNotChangeButtonState', () => {
+    const { receiver, pointerChannel } = createHarness();
+
+    pointerChannel.onmessage({ data: encodePointerFrame({ seq: 1, tsMs: 0, dx: 1, dy: 1, buttons: 1 }) });
+
+    expect(receiver.getCursor().buttons).toBe(0);
+  });
+
+  test('reset_clearsCountersAndLastSeq', () => {
+    const { receiver, pointerChannel } = createHarness();
+    pointerChannel.onmessage({ data: encodePointerFrame({ seq: 40000, tsMs: 0 }) });
+
+    receiver.reset();
+    pointerChannel.onmessage({ data: encodePointerFrame({ seq: 1, tsMs: 0 }) });
+
+    expect(receiver.getStats()).toMatchObject({ pointerFrames: 1, pointerLost: 0, lastSeq: 1 });
+  });
+
   test('pointerFrame_withGarbage_isIgnored', () => {
     const { receiver, pointerChannel } = createHarness();
 

@@ -12,7 +12,8 @@ import { createSampleRing, summarize } from '../../shared/metrics/stats';
 import { CONTROL_MESSAGE, decodeControlMessage } from '../../shared/protocol/control-messages';
 
 export const PATH = Object.freeze({ DATACHANNEL: 'datachannel', SOCKET: 'socket' });
-const FALLBACK_REASONS = new Set(['open-timeout', 'failed', 'grant-failed', 'room-not-found', 'room-busy', 'grant-denied']);
+// Every close the user did not ask for falls back to the socket path.
+const USER_STOP_REASON = 'stopped';
 
 /**
  * Manages a remote-control session.
@@ -31,10 +32,15 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
   const [activePath, setActivePath] = useState('');
   const [phase, setPhase] = useState('idle');
   const [status, setStatus] = useState('');
-  const [pair, setPair] = useState({ pairType: '', rttMs: null });
+  const [pair, setPairState] = useState({ pairType: '', rttMs: null });
   const [metrics, setMetrics] = useState(null);
   const [log, setLog] = useState([]);
 
+  const pairRef = useRef({ pairType: '', rttMs: null });
+  const setPair = useCallback((next) => {
+    pairRef.current = next;
+    setPairState(next);
+  }, []);
   const senderRef = useRef(null);
   const pipelineRef = useRef(null);
   const probeRef = useRef(null);
@@ -139,13 +145,14 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
         onClosed: (reason) => {
           appendLog(`datachannel closed: ${reason}`);
           channelsRef.current = null;
-          if (FALLBACK_REASONS.has(reason)) activateSocketPath(`fallback after ${reason}`);
+          if (senderRef.current === sender) senderRef.current = null;
+          if (reason !== USER_STOP_REASON) activateSocketPath(`fallback after ${reason}`);
         },
       },
     });
     senderRef.current = sender;
     sender.start();
-  }, [api, appendLog, cymcastUrl, ensurePipeline, forceRelay, onControlReply, startProbe, token, activateSocketPath]);
+  }, [api, appendLog, cymcastUrl, ensurePipeline, forceRelay, onControlReply, setPair, startProbe, token, activateSocketPath]);
 
   const start = useCallback(() => {
     if (!socket || !socket.connected) return appendLog('socket not connected');
@@ -159,7 +166,7 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
     setOpen(true);
     if (preferredPath === PATH.DATACHANNEL) startDataChannel();
     else activateSocketPath('selected');
-  }, [appendLog, preferredPath, socket, startDataChannel, activateSocketPath]);
+  }, [appendLog, preferredPath, setPair, socket, startDataChannel, activateSocketPath]);
 
   const stop = useCallback(() => {
     if (pipelineRef.current) {
@@ -194,7 +201,8 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
     [open, startDataChannel, activateSocketPath],
   );
 
-  // Metrics snapshot every second.
+  // Metrics snapshot every second. The pair is read from a ref so the stats
+  // ticker (which updates it every second) does not restart this interval.
   useEffect(() => {
     if (!open) return undefined;
     const timer = setInterval(() => {
@@ -205,8 +213,8 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
       const elapsed = Math.max(1, (performance.now() - counter.since) / 1000);
       setMetrics({
         path: activePath,
-        pairType: pair.pairType,
-        iceRttMs: pair.rttMs,
+        pairType: pairRef.current.pairType,
+        iceRttMs: pairRef.current.rttMs,
         probeRtt: summarize(rtts),
         ackRtt: summarize(acks),
         clockOffsetMs: probe ? probe.clockOffsetMs() : null,
@@ -216,7 +224,7 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [open, activePath, pair, forceRelay]);
+  }, [open, activePath, forceRelay]);
 
   useEffect(() => () => stop(), [stop]);
 
