@@ -67,10 +67,8 @@ export const RemoteDialog = ({ getPipeline, onClose, statusLine, onToggleScript,
     }
     // Coalesced samples live on the native event; React's synthetic event does not expose them.
     const native = event.nativeEvent;
-    const samples =
-      native && typeof native.getCoalescedEvents === 'function' && native.getCoalescedEvents().length
-        ? native.getCoalescedEvents()
-        : [event];
+    const coalesced = native && typeof native.getCoalescedEvents === 'function' ? native.getCoalescedEvents() : null;
+    const samples = coalesced && coalesced.length ? coalesced : [event];
     let dx = 0;
     let dy = 0;
     let prev = last;
@@ -97,16 +95,19 @@ export const RemoteDialog = ({ getPipeline, onClose, statusLine, onToggleScript,
     }
   };
 
-  // A pressed mouse pointer that leaves the pad (or is cancelled) must never
-  // leave a button held. Touch pointers fire pointerleave after every lift, and
-  // a button may be held by another finger on the on-screen button, so touch
-  // lifts only forget their own pointer.
+  // A mouse that leaves the pad (or is cancelled) must never leave a button
+  // held: there is only one mouse pointer, so whatever it holds (pressed on the
+  // pad, or on the on-screen Left button) is released. Touch pointers fire
+  // pointerleave after every lift, and a button may be held by another finger
+  // on the on-screen button, so touch lifts only forget their own pointer.
   const onPointerGone = (event) => {
     const wasPressed = pointers.current.has(event.pointerId);
     pointers.current.delete(event.pointerId);
     if (event.pointerType !== 'mouse') return;
     hover.current = null;
-    if (wasPressed) withPipeline((p) => p.releaseAll());
+    withPipeline((p) => {
+      if (wasPressed || (typeof p.heldButtons === 'function' && p.heldButtons())) p.releaseAll();
+    });
   };
 
   const onWheel = (event) => {

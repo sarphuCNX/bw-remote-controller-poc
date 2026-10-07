@@ -107,11 +107,42 @@ describe('usePairing status check on connect', () => {
     });
     hook.rerender({ socketStatus: 'connected' });
     await waitFor(() => expect(api.pairStatus).toHaveBeenCalled());
-    await new Promise((resolve) => setTimeout(resolve, 2));
     act(() => emit({ type: 'PAIR_SUCCESSFUL', deviceName: 'Room A' }));
 
     await act(async () => {
       resolveStatus({ message: 'DISCONNECTED' });
+    });
+
+    expect(hook.result.current.isPaired).toBe(true);
+  });
+
+  test('staleConnectedStatus_afterUnpairDevice_isIgnored', async () => {
+    let resolveStatus;
+    const { hook, emit, api } = createHarness({
+      pairStatus: vi.fn(() => new Promise((resolve) => (resolveStatus = resolve))),
+    });
+    hook.rerender({ socketStatus: 'connected' });
+    await waitFor(() => expect(api.pairStatus).toHaveBeenCalled());
+    act(() => emit({ type: 'UNPAIR_DEVICE' }));
+
+    await act(async () => {
+      resolveStatus({ message: 'CONNECTED', data: { hardwareId: 'hw', deviceCode: 'ROOM', deviceName: 'Room A' } });
+    });
+
+    expect(hook.result.current.isPaired).toBe(false);
+  });
+
+  test('statusResponse_afterUnrelatedSocketMessage_isStillApplied', async () => {
+    let resolveStatus;
+    const { hook, emit, api } = createHarness({
+      pairStatus: vi.fn(() => new Promise((resolve) => (resolveStatus = resolve))),
+    });
+    hook.rerender({ socketStatus: 'connected' });
+    await waitFor(() => expect(api.pairStatus).toHaveBeenCalled());
+    act(() => emit({ type: 'MEETING_COMMAND', kind: 'ack', seq: 1 }));
+
+    await act(async () => {
+      resolveStatus({ message: 'CONNECTED', data: { hardwareId: 'hw', deviceCode: 'ROOM', deviceName: 'Room A' } });
     });
 
     expect(hook.result.current.isPaired).toBe(true);

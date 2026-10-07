@@ -113,7 +113,7 @@ describe('useControlSession fallback and path switching', () => {
     const { hook, socket } = createHarness();
     act(() => hook.result.current.start());
 
-    act(() => senders[0].options.callbacks.onClosed('preempted'));
+    act(() => senders[0].options.callbacks.onClosed('preempted', { terminal: true }));
 
     expect(hook.result.current.open).toBe(false);
     expect(hook.result.current.activePath).toBe('');
@@ -125,7 +125,7 @@ describe('useControlSession fallback and path switching', () => {
     const { hook } = createHarness();
     act(() => hook.result.current.start());
 
-    act(() => senders[0].options.callbacks.onClosed('bye'));
+    act(() => senders[0].options.callbacks.onClosed('bye', { terminal: true }));
 
     expect(hook.result.current.open).toBe(false);
     expect(hook.result.current.endedReason).toBe('bye');
@@ -134,7 +134,7 @@ describe('useControlSession fallback and path switching', () => {
   test('start_afterEndedSession_clearsEndedReason', () => {
     const { hook } = createHarness();
     act(() => hook.result.current.start());
-    act(() => senders[0].options.callbacks.onClosed('preempted'));
+    act(() => senders[0].options.callbacks.onClosed('preempted', { terminal: true }));
 
     act(() => hook.result.current.start());
 
@@ -146,9 +146,44 @@ describe('useControlSession fallback and path switching', () => {
     const { hook } = createHarness();
     act(() => hook.result.current.start());
 
-    act(() => senders[0].options.callbacks.onClosed('stopped'));
+    act(() => senders[0].options.callbacks.onClosed('stopped', { terminal: true, userStop: true }));
 
     expect(hook.result.current.activePath).toBe('');
+    expect(hook.result.current.endedReason).toBe('');
+  });
+
+  test('senderClosed_withTerminalFlagAndUnknownReason_endsSessionWithoutFallback', () => {
+    const { hook, socket } = createHarness();
+    act(() => hook.result.current.start());
+
+    act(() => senders[0].options.callbacks.onClosed('grant-failed', { terminal: true }));
+
+    expect(hook.result.current.open).toBe(false);
+    expect(hook.result.current.activePath).toBe('');
+    expect(hook.result.current.endedReason).toBe('grant-failed');
+    expect(socket.emit).toHaveBeenLastCalledWith('REMOTE_CONTROL', { type: 'REMOTE_STOP' });
+  });
+
+  test('senderClosed_withoutInfo_isTreatedAsNonTerminalAndFallsBack', () => {
+    const { hook } = createHarness();
+    act(() => hook.result.current.start());
+
+    act(() => senders[0].options.callbacks.onClosed('failed'));
+
+    expect(hook.result.current.open).toBe(true);
+    expect(hook.result.current.activePath).toBe(PATH.SOCKET);
+  });
+
+  test('senderClosed_terminalOnFirstRender_stillStopsViaStopRef', () => {
+    const { hook } = createHarness();
+    act(() => hook.result.current.start());
+    const sender = senders[0];
+    act(() => hook.result.current.stop());
+    act(() => hook.result.current.start());
+
+    act(() => sender.options.callbacks.onClosed('bye', { terminal: true }));
+
+    expect(hook.result.current.open).toBe(false);
   });
 
   test('switchPath_toDataChannelAfterFallback_createsNewSender', () => {

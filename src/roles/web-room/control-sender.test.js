@@ -77,7 +77,7 @@ function createHarness(overrides = {}) {
   const FakeWebSocket = createFakeWebSocket();
   const pcFactory = createFakePeerConnectionFactory();
   const timers = [];
-  const events = { phases: [], closed: [], errors: [], channels: [], pairs: [] };
+  const events = { phases: [], closed: [], closedInfo: [], errors: [], channels: [], pairs: [] };
   const sender = createControlSender({
     cymcastUrl: 'https://cymcast.test',
     getGrant: async () => 'grant-1',
@@ -94,7 +94,10 @@ function createHarness(overrides = {}) {
     clearInterval: () => {},
     callbacks: {
       onPhase: (p) => events.phases.push(p),
-      onClosed: (r) => events.closed.push(r),
+      onClosed: (r, info) => {
+        events.closed.push(r);
+        events.closedInfo.push(info);
+      },
       onError: (c) => events.errors.push(c),
       onChannels: (c) => events.channels.push(c),
       onPair: (p) => events.pairs.push(p),
@@ -366,6 +369,60 @@ describe('createControlSender failure and recovery', () => {
     expect(h.events.closed).toEqual(['grant-denied']);
   });
 
+  test('grantDeniedError_isReportedAsTerminal', async () => {
+    const h = createHarness();
+    h.sender.start();
+    await h.flush();
+    const socket = h.FakeWebSocket.sockets[0];
+    socket.onopen();
+    await h.flush();
+
+    socket.onmessage({ data: JSON.stringify({ type: 'error', code: 'room-busy', message: 'busy' }) });
+
+    expect(h.events.closedInfo).toEqual([{ terminal: true, userStop: false }]);
+  });
+
+  test('nonTerminalError_doesNotClose', async () => {
+    const h = createHarness();
+    h.sender.start();
+    await h.flush();
+    const socket = h.FakeWebSocket.sockets[0];
+    socket.onopen();
+    await h.flush();
+
+    socket.onmessage({ data: JSON.stringify({ type: 'error', code: 'rate-limited', message: 'slow down' }) });
+
+    expect(h.events.errors).toEqual(['rate-limited']);
+    expect(h.events.closed).toHaveLength(0);
+  });
+
+  test('openTimeout_isReportedAsNotTerminal', async () => {
+    const h = createHarness();
+    h.sender.start();
+    await h.flush();
+    h.FakeWebSocket.sockets[0].onopen();
+    await h.flush();
+
+    const deadline = h.timers.filter((t) => t.ms === 5000 && !t.cancelled).pop();
+    deadline.fn();
+
+    expect(h.events.closedInfo).toEqual([{ terminal: false, userStop: false }]);
+  });
+
+  test('connectionFailed_thirdTime_isReportedAsNotTerminal', async () => {
+    const h = createHarness();
+    const { pc } = await connectToPeer(h);
+    for (let i = 0; i < 3; i += 1) {
+      const current = h.pcFactory.pcs[h.pcFactory.pcs.length - 1] || pc;
+      current.connectionState = 'failed';
+      current.onconnectionstatechange();
+      await h.flush();
+    }
+
+    expect(h.events.closed).toEqual(['failed']);
+    expect(h.events.closedInfo).toEqual([{ terminal: false, userStop: false }]);
+  });
+
   test('getGrantRejects_closesWithGrantFailed', async () => {
     const h = createHarness({ getGrant: async () => { throw new Error('nope'); } });
     h.sender.start();
@@ -375,6 +432,7 @@ describe('createControlSender failure and recovery', () => {
     await h.flush();
 
     expect(h.events.closed).toEqual(['grant-failed']);
+    expect(h.events.closedInfo).toEqual([{ terminal: true, userStop: false }]);
   });
 
   test('signalingClose_withLiveSession_reconnectsAndResumes', async () => {
@@ -399,6 +457,17 @@ describe('createControlSender failure and recovery', () => {
     socket.onmessage({ data: JSON.stringify({ type: 'bye', sessionId: 's1' }) });
 
     expect(h.events.closed).toEqual(['bye']);
+    expect(h.events.closedInfo).toEqual([{ terminal: true, userStop: false }]);
+  });
+
+  test('byeWithPreemptedReason_closesWithPreemptedAsTerminal', async () => {
+    const h = createHarness();
+    const { socket } = await connectToPeer(h);
+
+    socket.onmessage({ data: JSON.stringify({ type: 'bye', sessionId: 's1', reason: 'preempted' }) });
+
+    expect(h.events.closed).toEqual(['preempted']);
+    expect(h.events.closedInfo).toEqual([{ terminal: true, userStop: false }]);
   });
 
   test('restartFromPanel_reoffersWithIceRestart', async () => {
@@ -419,5 +488,48 @@ describe('createControlSender failure and recovery', () => {
 
     expect(socket.sent[socket.sent.length - 1]).toEqual({ type: 'bye', sessionId: 's1', sessionToken: 't1' });
     expect(h.events.closed).toEqual(['stopped']);
+  });
+
+  test('stop_isReportedAsTerminalUserStop', async () => {
+    const h = createHarness();
+    await connectToPeer(h);
+
+    h.sender.stop();
+
+    expect(h.events.closedInfo).toEqual([{ terminal: true, userStop: true }]);
+  });
+
+  test('start_afterClose_opensFreshSignalingFromIdle', async () => {
+    const h = createHarness();
+    h.sender.start();
+    await h.flush();
+    h.FakeWebSocket.sockets[0].onopen();
+    await h.flush();
+    h.timers.filter((t) => t.ms === 5000 && !t.cancelled).pop().fn();
+    expect(h.events.closed).toEqual(['open-timeout']);
+
+    h.sender.start();
+    await h.flush();
+    const second = h.FakeWebSocket.sockets[1];
+    second.onopen();
+    await h.flush();
+
+    expect(second.sent[0]).toEqual({ type: 'connect', token: 'grant-1' });
+    expect(h.sender.getState()).toMatchObject({ phase: 'signaling', rung: 0 });
+  });
+
+  test('start_afterStop_reachesReadyAgainAndReportsASecondClose', async () => {
+    const h = createHarness();
+    await connectToPeer(h);
+    h.sender.stop();
+
+    h.sender.start();
+    await h.flush();
+    const second = h.FakeWebSocket.sockets[1];
+    second.onopen();
+    await h.flush();
+    second.onmessage({ data: JSON.stringify({ type: 'bye', sessionId: 's2' }) });
+
+    expect(h.events.closed).toEqual(['stopped', 'bye']);
   });
 });

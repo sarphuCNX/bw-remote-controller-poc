@@ -18,11 +18,13 @@ export const STATS_INTERVAL_MS = 1000;
 /** The one close reason the user asked for. */
 export const USER_STOP_REASON = 'stopped';
 /**
- * Close reasons that end the session for good: the user stopped, the panel or
- * another controller ended it, or the session no longer exists. These must
- * never trigger a fallback to another input path.
+ * Signaling error codes that end the session for good: the grant was refused,
+ * the panel is offline, another controller owns the room, or the session no
+ * longer exists. The sender classifies every close as terminal or not in ONE
+ * place (`close`), and reports the flag to the caller, so no second list has
+ * to be kept in sync elsewhere.
  */
-export const TERMINAL_REASONS = Object.freeze(new Set([USER_STOP_REASON, 'bye', 'preempted', 'resume-rejected']));
+const TERMINAL_ERROR_CODES = Object.freeze(new Set(['grant-denied', 'room-not-found', 'room-busy', 'resume-rejected']));
 const MAX_RUNG = 2; // 1: ICE restart, 2: relay-only rebuild
 
 /**
@@ -71,7 +73,7 @@ export function readSelectedPair(report) {
  * @param {function} [options.clearTimeout] - injectable timer clear
  * @param {function} [options.setInterval] - injectable interval
  * @param {function} [options.clearInterval] - injectable interval clear
- * @param {object} [options.callbacks] - onStatus(text), onPhase(phase), onChannels({pointerChannel, controlChannel}), onPair({pairType, rttMs}), onClosed(reason), onError(code, message), onControlMessage(text)
+ * @param {object} [options.callbacks] - onStatus(text), onPhase(phase), onChannels({pointerChannel, controlChannel}), onPair({pairType, rttMs}), onClosed(reason, {terminal, userStop}), onError(code, message), onControlMessage(text)
  * @returns {object} sender API: start(), stop(), sendControl(message), getState()
  */
 export function createControlSender({
@@ -210,7 +212,8 @@ export function createControlSender({
       grant = await getGrant();
     } catch (error) {
       cb.onError('grant-failed', String((error && error.message) || error));
-      close('grant-failed');
+      // bird-ai-server refused the grant: the user is not entitled to control this panel.
+      close('grant-failed', { terminal: true });
       return;
     }
     // The deadline may have closed the sender while the grant was in flight.
@@ -249,16 +252,15 @@ export function createControlSender({
         void reoffer({ iceRestart: true });
         break;
       case 'bye':
-        close(message.reason === 'preempted' ? 'preempted' : 'bye');
+        // The panel, or a controller that took over, ended the session.
+        close(message.reason === 'preempted' ? 'preempted' : 'bye', { terminal: true });
         break;
       case 'resumed':
         cb.onStatus('signaling resumed');
         break;
       case 'error':
         cb.onError(message.code || '', message.message || message.code || 'error');
-        if (['grant-denied', 'room-not-found', 'room-busy', 'resume-rejected'].includes(message.code)) {
-          close(message.code);
-        }
+        if (TERMINAL_ERROR_CODES.has(message.code)) close(message.code, { terminal: true });
         break;
       default:
         break;
@@ -412,7 +414,15 @@ export function createControlSender({
     return true;
   }
 
-  function close(reason) {
+  /**
+   * Closes the sender and reports why. Non-terminal closes (timeouts, failed
+   * recovery, lost signaling before a session) may be followed by a fallback;
+   * terminal ones must not.
+   * @param {string} reason - close reason
+   * @param {{terminal?: boolean}} [options] - whether the session is over for good
+   * @returns {void}
+   */
+  function close(reason, { terminal = false } = {}) {
     if (phase === 'closed') return;
     cancel(openTimer);
     cancel(reconnectTimer);
@@ -430,12 +440,19 @@ export function createControlSender({
     sessionId = '';
     sessionToken = '';
     setPhase('closed', `closed: ${reason}`);
-    cb.onClosed(reason);
+    cb.onClosed(reason, { terminal, userStop: reason === USER_STOP_REASON });
   }
 
   return {
+    /**
+     * Starts (or restarts after a close) the signaling and the control session.
+     * @returns {void}
+     */
     start() {
       stopped = false;
+      phase = 'idle';
+      rung = 0;
+      reconnectDelay = RECONNECT_INITIAL_MS;
       // The deadline covers signaling and the grant too, not only ICE.
       armOpenDeadline();
       void openSignaling();
@@ -447,7 +464,7 @@ export function createControlSender({
     stop() {
       stopped = true;
       sendSession({ type: 'bye' });
-      close(USER_STOP_REASON);
+      close(USER_STOP_REASON, { terminal: true });
     },
     sendControl,
     getState: () => ({ phase, rung, sessionId: sessionId ? 'set' : '', hasPc: !!pc }),

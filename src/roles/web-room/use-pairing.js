@@ -30,18 +30,21 @@ export function usePairing({ api, token, subscribe, socketStatus }) {
   const [deviceName, setDeviceName] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const lastSocketEventAtRef = useRef(0);
+  // Counts pairing-state messages from the socket; a REST status answer that
+  // was requested before the latest one is stale and ignored.
+  const pairingEventSeqRef = useRef(0);
 
   // Socket-driven confirmation and teardown.
   useEffect(() => {
     return subscribe(({ event, payload }) => {
       if (event !== 'message' || !payload) return;
-      lastSocketEventAtRef.current = Date.now();
       if (payload.type === 'PAIR_SUCCESSFUL') {
+        pairingEventSeqRef.current += 1;
         setStep(PAIRING_STEP.PAIRED);
         setDeviceName(payload.deviceName || '');
         setMessage('paired');
       } else if (payload.type === 'UNPAIR_DEVICE') {
+        pairingEventSeqRef.current += 1;
         setStep(PAIRING_STEP.ROOM_ID);
         setPin('');
         setMessage('unpaired by the panel or server');
@@ -55,11 +58,11 @@ export function usePairing({ api, token, subscribe, socketStatus }) {
   useEffect(() => {
     if (!token || socketStatus !== 'connected') return undefined;
     let cancelled = false;
-    const requestedAt = Date.now();
+    const seqAtRequest = pairingEventSeqRef.current;
     api
       .pairStatus(token)
       .then((status) => {
-        if (cancelled || lastSocketEventAtRef.current > requestedAt) return;
+        if (cancelled || pairingEventSeqRef.current !== seqAtRequest) return;
         if (status.message === 'CONNECTED') {
           setStep(PAIRING_STEP.PAIRED);
           setHardwareId((status.data && status.data.hardwareId) || '');

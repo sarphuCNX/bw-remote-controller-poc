@@ -4,7 +4,7 @@
 // opens, or the socket path (comparison mode, or fallback after a timeout).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createControlSender, TERMINAL_REASONS, USER_STOP_REASON } from './control-sender';
+import { createControlSender } from './control-sender';
 import { createDataChannelSink, createSocketSink, SOCKET_CHANNEL, V1_TYPES } from './sinks';
 import { createInputPipeline } from './input-pipeline';
 import { createLatencyProbe } from '../../shared/metrics/latency-probe';
@@ -142,16 +142,17 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
           startProbe((probe) => sender.sendControl(probe));
           appendLog('input path: datachannel (open)');
         },
-        onClosed: (reason) => {
+        onClosed: (reason, { terminal = false, userStop = false } = {}) => {
           appendLog(`datachannel closed: ${reason}`);
           channelsRef.current = null;
           if (senderRef.current === sender) senderRef.current = null;
-          if (reason === USER_STOP_REASON) return;
-          if (TERMINAL_REASONS.has(reason)) {
-            // The panel or another controller ended the session: never keep
-            // driving the panel over another path.
-            setEndedReason(reason);
-            if (stopRef.current) stopRef.current();
+          if (terminal) {
+            // The session is over for good (user stop, panel or another controller
+            // ended it, or we are not entitled): never drive the panel over another path.
+            if (!userStop) {
+              setEndedReason(reason);
+              if (stopRef.current) stopRef.current();
+            }
             return;
           }
           activateSocketPath(`fallback after ${reason}`);
@@ -193,7 +194,12 @@ export function useControlSession({ socket, subscribe, api, token, cymcastUrl })
     setActivePath('');
     setPhase('idle');
   }, [socket]);
-  stopRef.current = stop;
+
+  // The sender's onClosed is wired before `stop` exists in this render; keep the
+  // latest stop reachable without side effects in the render body.
+  useEffect(() => {
+    stopRef.current = stop;
+  }, [stop]);
 
   // Switch path while open (comparison mode).
   const switchPath = useCallback(

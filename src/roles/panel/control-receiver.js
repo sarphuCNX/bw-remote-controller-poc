@@ -35,13 +35,19 @@ export function createControlReceiver({ surface = DEFAULT_SURFACE, now, applyDel
   let controlChannel = null;
   let delay = applyDelayMs;
   let currentSessionId = '';
+  let hasSession = false;
+  // Bumped whenever the control source goes away; delayed applies captured
+  // under an older generation are dropped instead of landing on the new state.
+  let generation = 0;
 
   /**
    * Releases every held button, as a real injector must when its controller
-   * goes away: a drag must never outlive the channel that started it.
+   * goes away: a drag must never outlive the channel that started it. Also
+   * invalidates any apply still queued behind the simulated delay.
    * @returns {void}
    */
   function releaseHeldButtons() {
+    generation += 1;
     if (!cursor.buttons) return;
     cursor.buttons = 0;
     cb.onCursor({ ...cursor });
@@ -69,8 +75,14 @@ export function createControlReceiver({ surface = DEFAULT_SURFACE, now, applyDel
   }
 
   function withApplyDelay(fn) {
-    if (delay > 0) schedule(fn, delay);
-    else fn();
+    if (delay <= 0) {
+      fn();
+      return;
+    }
+    const scheduledGeneration = generation;
+    schedule(() => {
+      if (scheduledGeneration === generation) fn();
+    }, delay);
   }
 
   /**
@@ -153,8 +165,9 @@ export function createControlReceiver({ surface = DEFAULT_SURFACE, now, applyDel
    * @returns {boolean} true when a new session started (state was reset)
    */
   function beginSession(sessionId) {
-    const id = String(sessionId || '');
-    if (id && id === currentSessionId) return false;
+    const id = sessionId == null ? '' : String(sessionId);
+    if (hasSession && id === currentSessionId) return false;
+    hasSession = true;
     currentSessionId = id;
     reset();
     return true;
@@ -177,7 +190,9 @@ export function createControlReceiver({ surface = DEFAULT_SURFACE, now, applyDel
       controlChannel = channel;
       channel.onmessage = (event) => onControlData(event.data);
       channel.onclose = () => {
-        if (controlChannel === channel) controlChannel = null;
+        // A stale channel from an earlier channel set must not touch the live session.
+        if (controlChannel !== channel) return;
+        controlChannel = null;
         releaseHeldButtons();
       };
       return true;

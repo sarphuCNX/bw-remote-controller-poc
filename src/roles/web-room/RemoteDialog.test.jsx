@@ -18,7 +18,7 @@ if (typeof window.PointerEvent === 'undefined') {
  * Renders the dialog over a recording pipeline.
  * @returns {{pipeline: object, pad: HTMLElement}} the harness
  */
-function renderDialog() {
+function renderDialog({ heldButtons = 0 } = {}) {
   const pipeline = {
     move: vi.fn(),
     scroll: vi.fn(),
@@ -26,12 +26,27 @@ function renderDialog() {
     click: vi.fn(),
     key: vi.fn(),
     releaseAll: vi.fn(),
+    heldButtons: vi.fn(() => heldButtons),
   };
   render(<RemoteDialog getPipeline={() => pipeline} onClose={() => {}} statusLine="test" />);
   return { pipeline, pad: screen.getByTestId('remote-pad') };
 }
 
 const mouse = (overrides) => ({ pointerId: 1, pointerType: 'mouse', button: 0, ...overrides });
+
+/**
+ * Builds a native pointermove event whose coalesced-sample list is scripted.
+ * @param {{clientX: number, clientY: number}} init - the event position
+ * @param {Array<{clientX: number, clientY: number}>|undefined} coalesced - samples, or undefined for no API
+ * @returns {{event: Event, getCoalescedEvents: object|undefined}} the event and the spy
+ */
+function nativePointerMove(init, coalesced) {
+  const event = new window.PointerEvent('pointermove', { bubbles: true, pointerId: 1, pointerType: 'mouse', ...init });
+  if (coalesced === undefined) return { event, getCoalescedEvents: undefined };
+  const getCoalescedEvents = vi.fn(() => coalesced);
+  event.getCoalescedEvents = getCoalescedEvents;
+  return { event, getCoalescedEvents };
+}
 
 describe('RemoteDialog mouse handling', () => {
   test('mouseMove_withoutButtonHeld_movesByDeltaFromPreviousSample', () => {
@@ -73,6 +88,50 @@ describe('RemoteDialog mouse handling', () => {
     fireEvent.pointerLeave(pad, mouse({ clientX: -1, clientY: 10, button: -1 }));
 
     expect(pipeline.releaseAll).not.toHaveBeenCalled();
+  });
+
+  test('mouseLeave_whileAButtonIsHeldFromTheOnScreenButton_releasesAll', () => {
+    const LEFT_HELD = 1;
+    const { pipeline, pad } = renderDialog({ heldButtons: LEFT_HELD });
+    fireEvent.pointerMove(pad, mouse({ clientX: 10, clientY: 10 }));
+
+    fireEvent.pointerLeave(pad, mouse({ clientX: -1, clientY: 10, button: -1 }));
+
+    expect(pipeline.releaseAll).toHaveBeenCalledTimes(1);
+  });
+
+  test('mouseMove_withCoalescedSamples_sumsDeltasAndReadsTheListOnce', () => {
+    const { pipeline, pad } = renderDialog();
+    fireEvent.pointerMove(pad, mouse({ clientX: 10, clientY: 10 }));
+    const { event, getCoalescedEvents } = nativePointerMove({ clientX: 15, clientY: 13 }, [
+      { clientX: 12, clientY: 10 },
+      { clientX: 15, clientY: 13 },
+    ]);
+
+    fireEvent(pad, event);
+
+    expect(pipeline.move).toHaveBeenCalledWith(5, 3);
+    expect(getCoalescedEvents).toHaveBeenCalledTimes(1);
+  });
+
+  test('mouseMove_withEmptyCoalescedList_fallsBackToTheEventItself', () => {
+    const { pipeline, pad } = renderDialog();
+    fireEvent.pointerMove(pad, mouse({ clientX: 10, clientY: 10 }));
+    const { event } = nativePointerMove({ clientX: 14, clientY: 11 }, []);
+
+    fireEvent(pad, event);
+
+    expect(pipeline.move).toHaveBeenCalledWith(4, 1);
+  });
+
+  test('mouseMove_withoutCoalescedEventsApi_usesTheEventItself', () => {
+    const { pipeline, pad } = renderDialog();
+    fireEvent.pointerMove(pad, mouse({ clientX: 10, clientY: 10 }));
+    const { event } = nativePointerMove({ clientX: 16, clientY: 10 }, undefined);
+
+    fireEvent(pad, event);
+
+    expect(pipeline.move).toHaveBeenCalledWith(6, 0);
   });
 
   test('touchLift_doesNotReleaseAButtonHeldOnScreen', () => {

@@ -82,6 +82,19 @@ describe('createControlReceiver pointer', () => {
     expect(cursors.length).toBe(before + 1);
   });
 
+  test('beginSession_withEmptyId_resetsOnFirstCallOnly', () => {
+    const { receiver, pointerChannel } = createHarness();
+    pointerChannel.onmessage({ data: encodePointerFrame({ seq: 1, tsMs: 0 }) });
+
+    const first = receiver.beginSession('');
+    pointerChannel.onmessage({ data: encodePointerFrame({ seq: 2, tsMs: 0 }) });
+    const second = receiver.beginSession(undefined);
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(receiver.getStats().pointerFrames).toBe(1);
+  });
+
   test('beginSession_withNewId_resetsState_andSameIdDoesNot', () => {
     const { receiver, pointerChannel } = createHarness();
     pointerChannel.onmessage({ data: encodePointerFrame({ seq: 5, tsMs: 0 }) });
@@ -113,6 +126,61 @@ describe('createControlReceiver pointer', () => {
     controlChannel.onclose();
 
     expect(receiver.getCursor().buttons).toBe(0);
+  });
+
+  test('staleControlChannelClose_doesNotReleaseButtonsHeldOnTheLiveChannel', () => {
+    const { receiver, controlChannel: staleChannel } = createHarness();
+    const liveChannel = { label: 'control', readyState: 'open', send: () => {} };
+    receiver.attachChannel(liveChannel);
+    liveChannel.onmessage({ data: JSON.stringify({ t: 'button', button: 0, down: true, seq: 1 }) });
+
+    staleChannel.onclose();
+
+    expect(receiver.getCursor().buttons).toBe(1);
+  });
+
+  test('controlChannelClose_dropsQueuedDelayedApplies', () => {
+    const scheduled = [];
+    const { receiver, controlChannel, sentControl } = createHarness({
+      applyDelayMs: 20,
+      setTimeout: (fn, ms) => scheduled.push({ fn, ms }),
+    });
+    controlChannel.onmessage({ data: JSON.stringify({ t: 'button', button: 0, down: true, seq: 1 }) });
+
+    controlChannel.onclose();
+    scheduled[0].fn();
+
+    expect(receiver.getCursor().buttons).toBe(0);
+    expect(sentControl).toHaveLength(0);
+  });
+
+  test('reset_dropsQueuedDelayedPointerApply', () => {
+    const scheduled = [];
+    const { receiver, pointerChannel, cursors } = createHarness({
+      applyDelayMs: 20,
+      setTimeout: (fn, ms) => scheduled.push({ fn, ms }),
+    });
+    pointerChannel.onmessage({ data: encodePointerFrame({ seq: 1, dx: 50, dy: 0, tsMs: 0 }) });
+
+    receiver.reset();
+    const cursorsAfterReset = cursors.length;
+    scheduled[0].fn();
+
+    expect(cursors).toHaveLength(cursorsAfterReset);
+    expect(receiver.getCursor().x).toBe(500);
+  });
+
+  test('applyDelay_queuedUnderTheSameGeneration_stillApplies', () => {
+    const scheduled = [];
+    const { receiver, controlChannel } = createHarness({
+      applyDelayMs: 20,
+      setTimeout: (fn, ms) => scheduled.push({ fn, ms }),
+    });
+    controlChannel.onmessage({ data: JSON.stringify({ t: 'button', button: 0, down: true, seq: 1 }) });
+
+    scheduled[0].fn();
+
+    expect(receiver.getCursor().buttons).toBe(1);
   });
 
   test('reset_clearsCountersAndLastSeq', () => {
